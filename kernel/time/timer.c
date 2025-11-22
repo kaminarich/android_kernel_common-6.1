@@ -1023,7 +1023,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	unsigned int idx = UINT_MAX;
 	int ret = 0;
 
-	debug_assert_init(timer);
+	BUG_ON(!timer->function);
 
 	/*
 	 * This is a common optimization triggered by the networking code - if
@@ -1050,14 +1050,6 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		 * dequeue/enqueue dance.
 		 */
 		base = lock_timer_base(timer, &flags);
-		/*
-		 * Has @timer been shutdown? This needs to be evaluated
-		 * while holding base lock to prevent a race against the
-		 * shutdown code.
-		 */
-		if (!timer->function)
-			goto out_unlock;
-
 		forward_timer_base(base);
 
 		if (timer_pending(timer) && (options & MOD_TIMER_REDUCE) &&
@@ -1084,14 +1076,6 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		}
 	} else {
 		base = lock_timer_base(timer, &flags);
-		/*
-		 * Has @timer been shutdown? This needs to be evaluated
-		 * while holding base lock to prevent a race against the
-		 * shutdown code.
-		 */
-		if (!timer->function)
-			goto out_unlock;
-
 		forward_timer_base(base);
 	}
 
@@ -1150,12 +1134,8 @@ out_unlock:
  * mod_timer_pending() is the same for pending timers as mod_timer(), but
  * will not activate inactive timers.
  *
- * If @timer->function == NULL then the start operation is silently
- * discarded.
- *
  * Return:
- * * %0 - The timer was inactive and not modified or was in
- *	  shutdown state and the operation was discarded
+ * * %0 - The timer was inactive and not modified
  * * %1 - The timer was active and requeued to expire at @expires
  */
 int mod_timer_pending(struct timer_list *timer, unsigned long expires)
@@ -1181,12 +1161,8 @@ EXPORT_SYMBOL(mod_timer_pending);
  * same timer, then mod_timer() is the only safe way to modify the timeout,
  * since add_timer() cannot modify an already running timer.
  *
- * If @timer->function == NULL then the start operation is silently
- * discarded. In this case the return value is 0 and meaningless.
- *
  * Return:
- * * %0 - The timer was inactive and started or was in shutdown
- *	  state and the operation was discarded
+ * * %0 - The timer was inactive and started
  * * %1 - The timer was active and requeued to expire at @expires or
  *	  the timer was active and not modified because @expires did
  *	  not change the effective expiry time
@@ -1206,12 +1182,8 @@ EXPORT_SYMBOL(mod_timer);
  * modify an enqueued timer if that would reduce the expiration time. If
  * @timer is not enqueued it starts the timer.
  *
- * If @timer->function == NULL then the start operation is silently
- * discarded.
- *
  * Return:
- * * %0 - The timer was inactive and started or was in shutdown
- *	  state and the operation was discarded
+ * * %0 - The timer was inactive and started
  * * %1 - The timer was active and requeued to expire at @expires or
  *	  the timer was active and not modified because @expires
  *	  did not change the effective expiry time such that the
@@ -1234,9 +1206,6 @@ EXPORT_SYMBOL(timer_reduce);
  * The @timer->expires and @timer->function fields must be set prior
  * to calling this function.
  *
- * If @timer->function == NULL then the start operation is silently
- * discarded.
- *
  * If @timer->expires is already in the past @timer will be queued to
  * expire at the next timer tick.
  *
@@ -1245,8 +1214,7 @@ EXPORT_SYMBOL(timer_reduce);
  */
 void add_timer(struct timer_list *timer)
 {
-	if (WARN_ON_ONCE(timer_pending(timer)))
-		return;
+	BUG_ON(timer_pending(timer));
 	__mod_timer(timer, timer->expires, MOD_TIMER_NOTPENDING);
 }
 EXPORT_SYMBOL(add_timer);
@@ -1265,10 +1233,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	struct timer_base *new_base, *base;
 	unsigned long flags;
 
-	debug_assert_init(timer);
-
-	if (WARN_ON_ONCE(timer_pending(timer)))
-		return;
+	BUG_ON(timer_pending(timer) || !timer->function);
 
 	new_base = get_timer_cpu_base(timer->flags, cpu);
 
@@ -1278,13 +1243,6 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	 * wrong base locked.  See lock_timer_base().
 	 */
 	base = lock_timer_base(timer, &flags);
-	/*
-	 * Has @timer been shutdown? This needs to be evaluated while
-	 * holding base lock to prevent a race against the shutdown code.
-	 */
-	if (!timer->function)
-		goto out_unlock;
-
 	if (base != new_base) {
 		timer->flags |= TIMER_MIGRATING;
 
@@ -1298,7 +1256,6 @@ void add_timer_on(struct timer_list *timer, int cpu)
 
 	debug_timer_activate(timer);
 	internal_add_timer(base, timer);
-out_unlock:
 	raw_spin_unlock_irqrestore(&base->lock, flags);
 }
 EXPORT_SYMBOL_GPL(add_timer_on);
@@ -1587,12 +1544,6 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 		detach_timer(timer, true);
 
 		fn = timer->function;
-
-		if (WARN_ON_ONCE(!fn)) {
-			/* Should never happen. Emphasis on should! */
-			base->running_timer = NULL;
-			continue;
-		}
 
 		if (timer->flags & TIMER_IRQSAFE) {
 			raw_spin_unlock(&base->lock);
@@ -2102,6 +2053,8 @@ int timers_dead_cpu(unsigned int cpu)
 	struct timer_base *new_base;
 	int b, i;
 
+	BUG_ON(cpu_online(cpu));
+
 	for (b = 0; b < NR_BASES; b++) {
 		old_base = per_cpu_ptr(&timer_bases[b], cpu);
 		new_base = get_cpu_ptr(&timer_bases[b]);
@@ -2118,8 +2071,7 @@ int timers_dead_cpu(unsigned int cpu)
 		 */
 		forward_timer_base(new_base);
 
-		WARN_ON_ONCE(old_base->running_timer);
-		old_base->running_timer = NULL;
+		BUG_ON(old_base->running_timer);
 
 		for (i = 0; i < WHEEL_SIZE; i++)
 			migrate_timer_list(new_base, old_base->vectors + i);
