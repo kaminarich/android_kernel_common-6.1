@@ -6,39 +6,37 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
+    # Dihapus: container image agar 'git' dan 'submodules' berjalan lancar di host runner
 
     env:
-      DEBIAN_FRONTEND: noninteractive
+      # Nama kernel yang akan muncul di About Phone (setelah 6.1.xx)
       KERNEL_NAME: "Aetherium3.0-SKS"
-
+      
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
-          # Pastikan repository ini adalah fork atau mirror dari source yang kamu sebutkan
-          # Jika workflow ini ada di repo lain, kamu perlu uncomment baris di bawah:
-          # repository: ramabondanp/android_kernel_common-6.1
           submodules: recursive
           fetch-depth: 1
 
       - name: Install Dependencies
         run: |
-          apt-get update
-          apt-get install -y build-essential bc bison flex libssl-dev git curl \
+          echo "Installing build dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev
 
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-          echo "Downloading Clang..."
+          
+          echo "Downloading Clang 19..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
           
       - name: Prepare & Configure Kernel
         run: |
-          # Set Path
+          # Set Path agar compiler terbaca
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
           export ARCH=arm64
           export LLVM=1
@@ -49,6 +47,7 @@ jobs:
           # --- Custom Configs ---
           
           # 1. Set Kernel Name (Localversion)
+          # Hasilnya nanti: 6.1.xx-Aetherium3.0-SKS
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
           # 2. Configure LTO (Link Time Optimization)
@@ -82,22 +81,22 @@ jobs:
           chmod 777 patch
           
           echo "Running Patch..."
-          # Patch binary mengharapkan file 'Image' ada di folder yg sama
+          # Patch binary akan membaca 'Image' dan menghasilkan 'oImage'
           ./patch
           
-          # Patcher outputnya biasanya 'oImage', kita rename balik jadi 'Image'
+          # Rename 'oImage' kembali menjadi 'Image'
           if [ -f oImage ]; then
             echo "Patch success! Renaming oImage to Image..."
             mv -f oImage Image
           else
-            echo "Warning: oImage not found. Patch might have failed or overwritten Image directly."
+            echo "WARNING: oImage not found. Check if patch failed or file structure changed."
           fi
           
           ls -lh Image
 
-      - name: Verify Kernel Name
+      - name: Check Kernel Version Name
         run: |
-          # Cek string version di dalam file Image (opsional untuk memastikan nama masuk)
+          # Memastikan nama Aetherium masuk ke dalam binary
           strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
 
       - name: Upload Artifact
