@@ -1,0 +1,179 @@
+name: Build GKI 6.1 (KSU + SuSFS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Nama Kernel (Opsional, kosongkan untuk nama bawaan Android)'
+        required: false
+        default: ''
+      clang_version:
+        description: 'Versi Clang'
+        required: true
+        default: 'r536225 (Clang 19)'
+        type: choice
+        options:
+        - 'r536225 (Clang 19)'
+        - 'r547379 (Clang 20)'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install Dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential bc bison flex libssl-dev git curl \
+          python3 python3-pip lld zip unzip libncurses5-dev rsync \
+          cpio schedtool git-core gnupg
+
+      - name: Setup Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git config --global url."https://".insteadOf git://
+
+      - name: Initialize & Sync Source (GKI 6.1)
+        run: |
+          mkdir gki
+          cd gki
+          # Source Code Google Android 14 - 6.1
+          repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
+          repo sync -j$(nproc) --force-sync
+
+      - name: Setup Custom Clang
+        working-directory: gki
+        run: |
+          mkdir -p toolchain/clang
+          
+          if [ "${{ github.event.inputs.clang_version }}" == "r536225 (Clang 19)" ]; then
+            echo "Setting up Clang-19 (r536225)..."
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
+          else
+            echo "Setting up Clang-20 (r547379)..."
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+          fi
+          
+          echo "Downloading Clang..."
+          curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
+
+      - name: Patch KernelSU (Official)
+        working-directory: gki/common
+        run: |
+          echo "Setting up KernelSU (tiann)..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+
+      - name: Patch SuSFS (Manual)
+        working-directory: gki/common
+        run: |
+          echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus_temp
+          
+          cp -r sus_temp/kernel_patches/fs/* fs/
+          cp -r sus_temp/kernel_patches/include/* include/
+          cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+          
+          echo "Applying SUSFS Patch..."
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "Patch conflict or already applied..."
+          
+          rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch
+
+      - name: Apply Extra Cherry-Picks
+        working-directory: gki/common
+        run: |
+          echo "Applying requested cherry-picks..."
+          curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" | patch -p1
+          curl -L "https://github.com/Pzqqt/android_kernel_xiaomi_marble/commit/477706c2bcaaf48350c61f9f6824e1e454617147.patch" | patch -p1
+
+      - name: Configure Kernel
+        working-directory: gki/common
+        run: |
+          export PATH="$(pwd)/../toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export LLVM=1
+          
+          echo "Generating GKI defconfig..."
+          make O=out gki_defconfig
+
+          # --- Inject KSU & SuSFS ---
+          cat <<EOF >> out/.config
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          EOF
+
+          # --- LOGIKA PENAMAAN KERNEL ---
+          if [ ! -z "${{ github.event.inputs.kernel_name }}" ]; then
+            echo "Custom Name detected: ${{ github.event.inputs.kernel_name }}"
+            scripts/config --file out/.config --set-str LOCALVERSION "-${{ github.event.inputs.kernel_name }}"
+          else
+            echo "No Custom Name. Using default Android versioning."
+            # Pastikan localversion kosong agar mengikuti default kernel
+            scripts/config --file out/.config --set-str LOCALVERSION ""
+          fi
+
+          # --- LTO ---
+          echo "Configuring LTO..."
+          scripts/config --file out/.config \
+              -e LTO_CLANG \
+              -d LTO_NONE \
+              -e LTO_CLANG_THIN \
+              -d LTO_CLANG_FULL \
+              -e THINLTO
+
+      - name: Build Kernel Image
+        working-directory: gki/common
+        run: |
+          export PATH="$(pwd)/../toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export LLVM=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          
+          echo "Starting Build..."
+          make -j"$(nproc --all)" O=out Image
+
+      - name: Determine Artifact Name
+        id: artifact-name
+        run: |
+          if [ -z "${{ github.event.inputs.kernel_name }}" ]; then
+            echo "NAME=GKI-Image-Android14" >> $GITHUB_ENV
+          else
+            echo "NAME=${{ github.event.inputs.kernel_name }}-Image" >> $GITHUB_ENV
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: gki/common/out/arch/arm64/boot/Image
+          compression-level: 9
