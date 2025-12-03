@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Nama Kernel (Opsional, kosongkan untuk nama bawaan Android)'
+        description: 'Nama Kernel (Opsional)'
         required: false
         default: ''
       clang_version:
@@ -29,9 +29,10 @@ jobs:
       - name: Install Dependencies
         run: |
           apt-get update
+          # FIX: Menambahkan libelf-dev agar tidak error 'libelf.h not found'
           apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev rsync \
-          cpio schedtool git-core gnupg
+          cpio schedtool git-core gnupg libelf-dev
 
       - name: Setup Repo Tool
         run: |
