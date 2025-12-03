@@ -1,4 +1,4 @@
-name: Build GKI 6.1 (KSU + SuSFS)
+name: Build GKI 6.1 (KSU + SuSFS) - Full Fix
 
 on:
   workflow_dispatch:
@@ -29,10 +29,10 @@ jobs:
       - name: Install Dependencies
         run: |
           apt-get update
-          # FIX: Menambahkan libelf-dev agar tidak error 'libelf.h not found'
+          # FIX: Tambahkan 'dwarves' (untuk pahole) dan 'libelf-dev'
           apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev rsync \
-          cpio schedtool git-core gnupg libelf-dev
+          cpio schedtool git-core gnupg libelf-dev dwarves
 
       - name: Setup Repo Tool
         run: |
@@ -51,7 +51,6 @@ jobs:
         run: |
           mkdir gki
           cd gki
-          # Source Code Google Android 14 - 6.1
           repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
           repo sync -j$(nproc) --force-sync
 
@@ -83,24 +82,16 @@ jobs:
           echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus_temp
           
-          # 1. Copy file header dan fs
           cp -r sus_temp/kernel_patches/fs/* fs/
           cp -r sus_temp/kernel_patches/include/* include/
-          
-          # 2. Copy patch file
           cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           
           echo "Applying SUSFS Patch..."
-          # Gunakan || true agar workflow tidak berhenti saat Hunk #1 gagal
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
           
-          # 3. FIX MANUAL fs/proc/base.c (Hunk #1 Conflict Fix)
-          # Patch SuSFS gagal inject header karena file sudah diubah KSU.
-          # Kita inject manual baris include susfs di bawah linux/fs.h
           echo "Fixing fs/proc/base.c conflict..."
           grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
           
-          # Bersihkan file sampah
           rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
 
       - name: Configure Kernel
@@ -138,10 +129,8 @@ jobs:
 
           # --- Logic Nama Kernel ---
           if [ ! -z "${{ github.event.inputs.kernel_name }}" ]; then
-            echo "Custom Name detected: ${{ github.event.inputs.kernel_name }}"
             scripts/config --file out/.config --set-str LOCALVERSION "-${{ github.event.inputs.kernel_name }}"
           else
-            echo "No Custom Name. Using default Android versioning."
             scripts/config --file out/.config --set-str LOCALVERSION ""
           fi
 
