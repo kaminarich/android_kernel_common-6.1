@@ -91,12 +91,6 @@ jobs:
           
           rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch
 
-      - name: Apply Extra Cherry-Picks
-        working-directory: gki/common
-        run: |
-          echo "Applying requested cherry-picks..."
-          curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" | patch -p1
-          curl -L "https://github.com/Pzqqt/android_kernel_xiaomi_marble/commit/477706c2bcaaf48350c61f9f6824e1e454617147.patch" | patch -p1
 
       - name: Configure Kernel
         working-directory: gki/common
@@ -117,7 +111,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFG_KSU_SUSFS_SUS_KSTAT=y
           CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
           CONFIG_KSU_SUSFS_TRY_UMOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
