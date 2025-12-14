@@ -11,7 +11,7 @@ jobs:
 
     env:
       DEBIAN_FRONTEND: noninteractive
-      KERNEL_NAME: "Aetherium3.0-KSU-Next"
+      KERNEL_NAME: "Aetherium3.3-Eclipse-KSN"
 
     steps:
       - name: Checkout Source Code
