@@ -5,7 +5,6 @@ on:
 
 jobs:
   build:
-    # Tetap gunakan Ubuntu 24.04 untuk kompatibilitas tools build terbaru
     runs-on: ubuntu-24.04
 
     env:
@@ -23,7 +22,6 @@ jobs:
         run: |
           echo "Updating package lists..."
           sudo apt-get update
-          # Dependensi lengkap (termasuk libelf-dev & dwarves untuk fix error sebelumnya)
           sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev libelf-dev dwarves
 
@@ -31,18 +29,23 @@ jobs:
         run: |
           mkdir -p toolchain/clang
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-          
           echo "Downloading Clang..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
 
-      - name: Install KernelSU-Next (Via Installer Script)
+      - name: Install KernelSU-Next (Cleaner Method)
         run: |
-          # 1. Bersihkan folder KernelSU lama (SukiSU) agar instalasi bersih
-          echo "Cleaning up existing KernelSU directory..."
+          # 1. Bersihkan folder submodule lama
+          echo "Removing old KernelSU directory..."
           rm -rf drivers/kernelsu
-          
-          # 2. Jalankan Script Installer Resmi (Metode User)
-          # Script ini otomatis handle clone branch 'dev' dan patching yang diperlukan
+
+          # 2. PENTING: Hapus referensi lama di Kconfig & Makefile (Penyebab Error line 242)
+          # Kita hapus baris apapun yang mengandung kata "kernelsu" di file driver bawaan
+          # agar script installer nanti bisa menulis ulang yang benar.
+          echo "Cleaning old Kconfig references..."
+          sed -i '/kernelsu/d' drivers/Kconfig
+          sed -i '/kernelsu/d' drivers/Makefile
+
+          # 3. Jalankan Script Installer
           echo "Running KernelSU-Next setup script..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
 
@@ -56,20 +59,16 @@ jobs:
           make O=out gki_defconfig
 
           # --- Custom Configs ---
-          
-          # 1. Identitas Kernel
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Optimasi Link Time (LTO)
+          # LTO Setup
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
-          # 3. Integrasi KernelSU
-          # Pastikan config KSU aktif (script installer biasanya sudah menambahkan ini, tapi kita force enable biar aman)
+          # KSU & OverlayFS
           scripts/config --file out/.config -e KSU
           scripts/config --file out/.config -e OVERLAY_FS
 
-          # 4. FIX Build Error (BTF/Pahole)
-          # Wajib dimatikan di GKI 6.1 Custom Build agar tidak error di tengah jalan
+          # FIX Build Error (BTF/Pahole) - OFF
           scripts/config --file out/.config -d DEBUG_INFO_BTF
           scripts/config --file out/.config -d DEBUG_INFO_BTF_MODULES
 
