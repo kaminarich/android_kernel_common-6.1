@@ -1,4 +1,4 @@
-name: Build Aetherium3.3 KSUN (GKI 6.1)
+name: Build Aetherium3.3-KSN (GKI 6.1)
 
 on:
   workflow_dispatch:
@@ -6,8 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
+    # container: image: ubuntu:22.04  <-- DIHAPUS AGAR GIT & SUBMODULE BERJALAN LANCAR
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -22,28 +21,27 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          apt-get update
-          apt-get install -y build-essential bc bison flex libssl-dev git curl \
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev
 
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
-          # Menggunakan Clang r536225 sesuai script awalmu
+          # Menggunakan Clang r536225
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           echo "Downloading Clang..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
 
-      # --- BAGIAN PENTING: GANTI KERNELSU ---
       - name: Setup KernelSU-Next (Replace SukiSU)
         run: |
+          # Langkah ini menimpa submodule SukiSU dengan KernelSU-Next
           echo "Removing existing KernelSU (SukiSU)..."
           rm -rf drivers/kernelsu
           
           echo "Cloning KernelSU-Next..."
-          # CATATAN: Pastikan branch-nya benar.
-          # Di screenshot history kamu branch lamanya adalah 'next-susfs-dev'.
-          # Jika kamu mau branch 'dev' biasa, ganti 'next-susfs-dev' menjadi 'dev' atau 'next'.
+          # Menggunakan branch 'next-susfs-dev' sesuai history kamu
+          # Jika ingin branch lain, ubah bagian '-b next-susfdev'
           git clone --depth=1 https://github.com/rifsxd/KernelSU-Next -b dev drivers/kernelsu
           
           echo "Verifying KernelSU version..."
@@ -66,12 +64,11 @@ jobs:
           # 2. Configure LTO
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
-          # 3. Enable KernelSU Configurations
-          # Kita paksa nyalakan config KSU di sini agar terbaca
+          # 3. Enable KernelSU Configurations (Wajib di-enable ulang karena beda modul)
           scripts/config --file out/.config -e KSU
           scripts/config --file out/.config -e OVERLAY_FS
           
-          # Jika menggunakan fitur SUSFS (sesuai nama branch next-susfs), mungkin butuh ini:
+          # Optional: Aktifkan SUSFS jika branch mendukung
           # scripts/config --file out/.config -e SUSFS
 
       - name: Build Kernel Image
@@ -85,6 +82,7 @@ jobs:
 
       - name: Verify Kernel Name
         run: |
+          # Memastikan nama version masuk ke dalam Image
           strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
 
       - name: Upload Artifact
