@@ -5,8 +5,7 @@ on:
 
 jobs:
   build:
-    # Menggunakan Ubuntu 24.04 (Noble Numbat) untuk memastikan kompatibilitas
-    # dengan toolchain dan binary terbaru (seperti pahole/dwarves versi baru).
+    # Menggunakan Ubuntu 24.04 agar kompatibel dengan tools terbaru
     runs-on: ubuntu-24.04
 
     env:
@@ -17,7 +16,6 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
-          # Mengambil source code beserta seluruh submodule secara rekursif
           submodules: recursive
           fetch-depth: 1
 
@@ -25,69 +23,58 @@ jobs:
         run: |
           echo "Updating package lists..."
           sudo apt-get update
-          
-          # Instalasi paket esensial untuk kompilasi kernel.
-          # Catatan: 
-          # - 'dwarves': Menyediakan tool 'pahole' yang dibutuhkan untuk generate BTF.
-          # - 'libelf-dev': Wajib ada untuk tool resolve_btfids agar tidak error 'libelf.h not found'.
+          # Install dependencies lengkap termasuk libelf-dev dan dwarves (untuk fix error sebelumnya)
           sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev libelf-dev dwarves
 
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
-          # Menggunakan prebuilt Clang r536225 dari Google untuk stabilitas build GKI
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
-          echo "Downloading and extracting Clang Toolchain..."
+          echo "Downloading Clang..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
 
-      - name: Configure KernelSU-Next (Replace Existing Submodule)
+      - name: Configure KernelSU-Next (Official Repo)
         run: |
-          # Membersihkan implementasi KernelSU lama (SukiSU) dari direktori driver
           echo "Cleaning up existing KernelSU directory..."
           rm -rf drivers/kernelsu
           
-          # Mengambil source code KernelSU-Next terbaru (Branch: dev)
-          echo "Cloning KernelSU-Next (Branch: dev)..."
-          git clone --depth=1 https://github.com/rifsxd/KernelSU-Next -b dev drivers/kernelsu
+          # PERBAIKAN UTAMA DI SINI:
+          # 1. Menggunakan URL Official: github.com/KernelSU-Next/KernelSU-Next (Bukan rifsxd lagi)
+          # 2. Menggunakan branch 'dev' (sesuai screenshot kamu)
+          echo "Cloning KernelSU-Next (Official Branch: dev)..."
+          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next -b dev drivers/kernelsu
           
-          # Verifikasi sederhana untuk memastikan cloning berhasil
           if [ -f "drivers/kernelsu/Makefile" ]; then
-              echo "KernelSU-Next successfully installed."
+              echo "KernelSU-Next successfully cloned from Official Repo."
           else
-              echo "Error: Failed to clone KernelSU-Next." && exit 1
+              echo "Error: Failed to clone. Check internet connection or branch name." && exit 1
           fi
 
       - name: Configure Kernel Build Options
         run: |
-          # Setup environment variables untuk cross-compilation
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
           export ARCH=arm64
           export LLVM=1
           
-          echo "Generating default GKI configuration..."
+          echo "Generating GKI defconfig..."
           make O=out gki_defconfig
 
-          # --- Modifikasi Konfigurasi (.config) ---
+          # --- Custom Configs ---
           
           # 1. Identitas Kernel
-          # Menambahkan nama custom ke versi kernel agar mudah diidentifikasi
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
           # 2. Optimasi Link Time (LTO)
-          # Menggunakan ThinLTO untuk keseimbangan performa runtime dan kecepatan build
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
           # 3. Integrasi KernelSU
-          # Mengaktifkan KSU dan OverlayFS yang dibutuhkan untuk modul Magisk/KSU
           scripts/config --file out/.config -e KSU
           scripts/config --file out/.config -e OVERLAY_FS
 
-          # 4. Penanganan Error BTF/Pahole (Critical Fix)
-          # Menonaktifkan DEBUG_INFO_BTF. Fitur ini sering menyebabkan kegagalan build
-          # di environment CI karena ketidakcocokan versi pahole atau vmlinux yang besar.
-          # Menonaktifkan ini aman untuk kernel Android standar dan menjamin build sukses.
+          # 4. FIX Build Error (BTF/Pahole)
+          # Wajib dimatikan agar build tidak gagal karena masalah debug info
           scripts/config --file out/.config -d DEBUG_INFO_BTF
           scripts/config --file out/.config -d DEBUG_INFO_BTF_MODULES
 
@@ -97,17 +84,16 @@ jobs:
           export ARCH=arm64
           export LLVM=1
           
-          echo "Starting compilation with $(nproc --all) threads..."
+          echo "Starting Build..."
           make -j"$(nproc --all)" O=out Image
 
       - name: Verify Compile Output
         run: |
-          # Memastikan file Image terbentuk dan mengecek string versinya
           if [ -f out/arch/arm64/boot/Image ]; then
-              echo "Build Successful. Checking version string..."
+              echo "Build SUCCESS! Checking version..."
               strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
           else
-              echo "Build Failed: Image file not found." && exit 1
+              echo "Build FAILED: Image not found." && exit 1
           fi
 
       - name: Upload Kernel Artifact
