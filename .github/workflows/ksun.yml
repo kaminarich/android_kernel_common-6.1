@@ -1,0 +1,108 @@
+name: Build Aetherium3.0-SKS (GKI 6.1)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      KERNEL_NAME: "Aetherium3.0-SKS"
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          # Pastikan repository ini adalah fork atau mirror dari source yang kamu sebutkan
+          # Jika workflow ini ada di repo lain, kamu perlu uncomment baris di bawah:
+          # repository: ramabondanp/android_kernel_common-6.1
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential bc bison flex libssl-dev git curl \
+          python3 python3-pip lld zip unzip libncurses5-dev
+
+      - name: Setup Toolchain (Clang 19)
+        run: |
+          mkdir -p toolchain/clang
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
+          echo "Downloading Clang..."
+          curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
+          
+      - name: Prepare & Configure Kernel
+        run: |
+          # Set Path
+          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export LLVM=1
+          
+          echo "Generating GKI defconfig..."
+          make O=out gki_defconfig
+
+          # --- Custom Configs ---
+          
+          # 1. Set Kernel Name (Localversion)
+          scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
+          
+          # 2. Configure LTO (Link Time Optimization)
+          echo "Configuring LTO..."
+          scripts/config --file out/.config \
+              -e LTO_CLANG \
+              -d LTO_NONE \
+              -e LTO_CLANG_THIN \
+              -d LTO_CLANG_FULL \
+              -e THINLTO
+
+          # 3. Enable SukiSU KPM
+       #   echo "Enabling SukiSU KPM..."
+      #    scripts/config --file out/.config -e KPM
+
+      - name: Build Kernel Image
+        run: |
+          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export LLVM=1
+          
+          echo "Starting Build..."
+          make -j"$(nproc --all)" O=out Image
+
+    #  - name: Apply SukiSU Patch
+    #    run: |
+    #      cd out/arch/arm64/boot
+          
+     #     echo "Downloading SukiSU Patcher..."
+     #     curl -LSs "https://github.com/SukiSU-Ultra/SukiSU_patch/raw/refs/heads/main/kpm/patch_linux" -o patch
+     #     chmod 777 patch
+          
+    #      echo "Running Patch..."
+          # Patch binary mengharapkan file 'Image' ada di folder yg sama
+     #     ./patch
+          
+          # Patcher outputnya biasanya 'oImage', kita rename balik jadi 'Image'
+   #       if [ -f oImage ]; then
+    #        echo "Patch success! Renaming oImage to Image..."
+     #       mv -f oImage Image
+    #      else
+     #       echo "Warning: oImage not found. Patch might have failed or overwritten Image directly."
+    #      fi
+          
+    #      ls -lh Image
+
+      - name: Verify Kernel Name
+        run: |
+          # Cek string version di dalam file Image (opsional untuk memastikan nama masuk)
+          strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_NAME }}-Image
+          path: out/arch/arm64/boot/Image
+          compression-level: 9
