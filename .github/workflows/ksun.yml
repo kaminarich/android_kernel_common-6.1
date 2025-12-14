@@ -1,4 +1,4 @@
-name: Build Aetherium3.0-SKS (GKI 6.1)
+name: Build Aetherium3.3 KSUN (GKI 6.1)
 
 on:
   workflow_dispatch:
