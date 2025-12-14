@@ -11,15 +11,12 @@ jobs:
 
     env:
       DEBIAN_FRONTEND: noninteractive
-      KERNEL_NAME: "Aetherium3.0-SKS"
+      KERNEL_NAME: "Aetherium3.0-KSU-Next"
 
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
-          # Pastikan repository ini adalah fork atau mirror dari source yang kamu sebutkan
-          # Jika workflow ini ada di repo lain, kamu perlu uncomment baris di bawah:
-          # repository: ramabondanp/android_kernel_common-6.1
           submodules: recursive
           fetch-depth: 1
 
@@ -32,13 +29,28 @@ jobs:
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
+          # Menggunakan Clang r536225 sesuai script awalmu
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           echo "Downloading Clang..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
+
+      # --- BAGIAN PENTING: GANTI KERNELSU ---
+      - name: Setup KernelSU-Next (Replace SukiSU)
+        run: |
+          echo "Removing existing KernelSU (SukiSU)..."
+          rm -rf drivers/kernelsu
           
+          echo "Cloning KernelSU-Next..."
+          # CATATAN: Pastikan branch-nya benar.
+          # Di screenshot history kamu branch lamanya adalah 'next-susfs-dev'.
+          # Jika kamu mau branch 'dev' biasa, ganti 'next-susfs-dev' menjadi 'dev' atau 'next'.
+          git clone --depth=1 https://github.com/rifsxd/KernelSU-Next -b dev drivers/kernelsu
+          
+          echo "Verifying KernelSU version..."
+          head -n 5 drivers/kernelsu/Makefile || echo "Makefile not found!"
+
       - name: Prepare & Configure Kernel
         run: |
-          # Set Path
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
           export ARCH=arm64
           export LLVM=1
@@ -48,21 +60,19 @@ jobs:
 
           # --- Custom Configs ---
           
-          # 1. Set Kernel Name (Localversion)
+          # 1. Set Kernel Name
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Configure LTO (Link Time Optimization)
-          echo "Configuring LTO..."
-          scripts/config --file out/.config \
-              -e LTO_CLANG \
-              -d LTO_NONE \
-              -e LTO_CLANG_THIN \
-              -d LTO_CLANG_FULL \
-              -e THINLTO
+          # 2. Configure LTO
+          scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
-          # 3. Enable SukiSU KPM
-       #   echo "Enabling SukiSU KPM..."
-      #    scripts/config --file out/.config -e KPM
+          # 3. Enable KernelSU Configurations
+          # Kita paksa nyalakan config KSU di sini agar terbaca
+          scripts/config --file out/.config -e KSU
+          scripts/config --file out/.config -e OVERLAY_FS
+          
+          # Jika menggunakan fitur SUSFS (sesuai nama branch next-susfs), mungkin butuh ini:
+          # scripts/config --file out/.config -e SUSFS
 
       - name: Build Kernel Image
         run: |
@@ -73,31 +83,8 @@ jobs:
           echo "Starting Build..."
           make -j"$(nproc --all)" O=out Image
 
-    #  - name: Apply SukiSU Patch
-    #    run: |
-    #      cd out/arch/arm64/boot
-          
-     #     echo "Downloading SukiSU Patcher..."
-     #     curl -LSs "https://github.com/SukiSU-Ultra/SukiSU_patch/raw/refs/heads/main/kpm/patch_linux" -o patch
-     #     chmod 777 patch
-          
-    #      echo "Running Patch..."
-          # Patch binary mengharapkan file 'Image' ada di folder yg sama
-     #     ./patch
-          
-          # Patcher outputnya biasanya 'oImage', kita rename balik jadi 'Image'
-   #       if [ -f oImage ]; then
-    #        echo "Patch success! Renaming oImage to Image..."
-     #       mv -f oImage Image
-    #      else
-     #       echo "Warning: oImage not found. Patch might have failed or overwritten Image directly."
-    #      fi
-          
-    #      ls -lh Image
-
       - name: Verify Kernel Name
         run: |
-          # Cek string version di dalam file Image (opsional untuk memastikan nama masuk)
           strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
 
       - name: Upload Artifact
