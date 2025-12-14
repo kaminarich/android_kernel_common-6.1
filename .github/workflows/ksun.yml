@@ -22,8 +22,9 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
+          # PERBAIKAN: Menambahkan libelf-dev untuk mengatasi error 'libelf.h not found'
           sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
-          python3 python3-pip lld zip unzip libncurses5-dev
+          python3 python3-pip lld zip unzip libncurses5-dev libelf-dev
 
       - name: Setup Toolchain (Clang 19)
         run: |
@@ -40,8 +41,7 @@ jobs:
           rm -rf drivers/kernelsu
           
           echo "Cloning KernelSU-Next..."
-          # Menggunakan branch 'next-susfs-dev' sesuai history kamu
-          # Jika ingin branch lain, ubah bagian '-b next-susfdev'
+          # Menggunakan branch 'dev' (Development)
           git clone --depth=1 https://github.com/rifsxd/KernelSU-Next -b dev drivers/kernelsu
           
           echo "Verifying KernelSU version..."
@@ -68,7 +68,7 @@ jobs:
           scripts/config --file out/.config -e KSU
           scripts/config --file out/.config -e OVERLAY_FS
           
-          # Optional: Aktifkan SUSFS jika branch mendukung
+          # Optional: Aktifkan SUSFS jika branch mendukung (Branch 'dev' biasa mungkin belum ada SUSFS)
           # scripts/config --file out/.config -e SUSFS
 
       - name: Build Kernel Image
