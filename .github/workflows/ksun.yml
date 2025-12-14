@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    # Menggunakan Ubuntu 24.04 agar kompatibel dengan tools terbaru
+    # Tetap gunakan Ubuntu 24.04 untuk kompatibilitas tools build terbaru
     runs-on: ubuntu-24.04
 
     env:
@@ -23,7 +23,7 @@ jobs:
         run: |
           echo "Updating package lists..."
           sudo apt-get update
-          # Install dependencies lengkap termasuk libelf-dev dan dwarves (untuk fix error sebelumnya)
+          # Dependensi lengkap (termasuk libelf-dev & dwarves untuk fix error sebelumnya)
           sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev libelf-dev dwarves
 
@@ -35,22 +35,16 @@ jobs:
           echo "Downloading Clang..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
 
-      - name: Configure KernelSU-Next (Official Repo)
+      - name: Install KernelSU-Next (Via Installer Script)
         run: |
+          # 1. Bersihkan folder KernelSU lama (SukiSU) agar instalasi bersih
           echo "Cleaning up existing KernelSU directory..."
           rm -rf drivers/kernelsu
           
-          # PERBAIKAN UTAMA DI SINI:
-          # 1. Menggunakan URL Official: github.com/KernelSU-Next/KernelSU-Next (Bukan rifsxd lagi)
-          # 2. Menggunakan branch 'dev' (sesuai screenshot kamu)
-          echo "Cloning KernelSU-Next (Official Branch: dev)..."
-          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next -b dev drivers/kernelsu
-          
-          if [ -f "drivers/kernelsu/Makefile" ]; then
-              echo "KernelSU-Next successfully cloned from Official Repo."
-          else
-              echo "Error: Failed to clone. Check internet connection or branch name." && exit 1
-          fi
+          # 2. Jalankan Script Installer Resmi (Metode User)
+          # Script ini otomatis handle clone branch 'dev' dan patching yang diperlukan
+          echo "Running KernelSU-Next setup script..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
 
       - name: Configure Kernel Build Options
         run: |
@@ -70,11 +64,12 @@ jobs:
           scripts/config --file out/.config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
           # 3. Integrasi KernelSU
+          # Pastikan config KSU aktif (script installer biasanya sudah menambahkan ini, tapi kita force enable biar aman)
           scripts/config --file out/.config -e KSU
           scripts/config --file out/.config -e OVERLAY_FS
 
           # 4. FIX Build Error (BTF/Pahole)
-          # Wajib dimatikan agar build tidak gagal karena masalah debug info
+          # Wajib dimatikan di GKI 6.1 Custom Build agar tidak error di tengah jalan
           scripts/config --file out/.config -d DEBUG_INFO_BTF
           scripts/config --file out/.config -d DEBUG_INFO_BTF_MODULES
 
