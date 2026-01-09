@@ -66,6 +66,27 @@ jobs:
           echo "Setting up KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
+      - name: Patch SuSFS (Manual + Fix Conflict)
+        working-directory: gki/common
+        run: |
+          echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus_temp
+          
+          echo "Copying patch files..."
+          cp -r sus_temp/kernel_patches/fs/* fs/
+          cp -r sus_temp/kernel_patches/include/* include/
+          cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+          
+          echo "Applying SUSFS Patch..."
+          # Gunakan || true agar tidak error jika patch sudah ada (karena clone ramabondanp)
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+          
+          echo "Fixing fs/proc/base.c conflict..."
+          # Logic ini akan mengecek header, jika belum ada akan di-inject setelah <linux/fs.h>
+          grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
+          
+          rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
+
       - name: Configure Kernel
         working-directory: gki/common
         run: |
@@ -172,3 +193,4 @@ jobs:
         with:
           name: ${{ env.NAME }}
           path: gki/common/out/arch/arm64/boot/Image
+          compression-level: 9
