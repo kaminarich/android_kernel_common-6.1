@@ -1,4 +1,4 @@
-name: Build GKI 6.1 (KSU + SuSFS + KPatch)
+name: Build GKI 6.1 (KSU + SuSFS + KPatch) - Fix Header
 
 on:
   workflow_dispatch:
@@ -66,7 +66,7 @@ jobs:
           echo "Setting up KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
-      - name: Patch SuSFS (Manual + Fix Conflict)
+      - name: Patch SuSFS (Manual + Force Header)
         working-directory: gki/common
         run: |
           echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
@@ -78,13 +78,16 @@ jobs:
           cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           
           echo "Applying SUSFS Patch..."
-          # Gunakan || true agar tidak error jika patch sudah ada (karena clone ramabondanp)
+          # Gunakan || true agar tidak error
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
           
-          echo "Fixing fs/proc/base.c conflict..."
-          # Logic ini akan mengecek header, jika belum ada akan di-inject setelah <linux/fs.h>
-          grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
+          echo "🔥 FORCE FIXING fs/proc/base.c..."
+          # Hapus include susfs jika sudah ada (biar ga duplikat)
+          sed -i '/#include <linux\/susfs.h>/d' fs/proc/base.c
+          # Masukkan header di BARIS PERTAMA (Line 1) agar pasti terbaca
+          sed -i '1i#include <linux/susfs.h>' fs/proc/base.c
           
+          echo "✅ Header injected at line 1 of fs/proc/base.c"
           rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
 
       - name: Configure Kernel
@@ -166,6 +169,9 @@ jobs:
               -e LTO_CLANG_THIN \
               -d LTO_CLANG_FULL \
               -e THINLTO
+              
+          echo "🔧 Running olddefconfig to fix config dependencies..."
+          make O=out olddefconfig
 
       - name: Build Kernel Image
         working-directory: gki/common
