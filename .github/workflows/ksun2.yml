@@ -1,4 +1,4 @@
-name: Build GKI 6.1 (KSUn KPatch)
+name: Build GKI 6.1 (KSU + SuSFS + KPatch)
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p toolchain/clang
           
-          if [ "${{ github.event.inputs.clang_version }}" == "r536225 (Clang 19)" ]; then
+          if [[ "${{ github.event.inputs.clang_version }}" == "r536225 (Clang 19)" ]]; then
             echo "Setting up Clang-19 (r536225)..."
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           else
@@ -78,17 +78,13 @@ jobs:
 
           echo "⚙️ Injecting Configs..."
           
-          # Config KSU & SuSFS & KPATCH
+          # Inject Config: KSU, KPatch, SuSFS
           cat <<EOF >> out/.config
           CONFIG_KSU=y
           CONFIG_KPM=n
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n
-          
-          # --- KPATCH SUPPORT ---
           CONFIG_KSU_KPATCH=y
-          
-          # --- SUSFS Method ---
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -106,13 +102,12 @@ jobs:
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          
           CONFIG_KSU_KPROBES_HOOK=n
           CONFIG_KSU_MANUAL_HOOK=n
           CONFIG_KSU_HAS_MANUAL_HOOK=n
           EOF
 
-          # Config Performa (KSNUNIV Style)
+          # Inject Config: Performance
           cat <<EOF >> out/.config
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
@@ -136,14 +131,14 @@ jobs:
           CONFIG_ZRAM_WRITEBACK=y
           EOF
 
-          # --- Logic Nama Kernel ---
-          if [ ! -z "${{ github.event.inputs.kernel_name }}" ]; then
+          # Set Local Version
+          if [[ ! -z "${{ github.event.inputs.kernel_name }}" ]]; then
             scripts/config --file out/.config --set-str LOCALVERSION "-${{ github.event.inputs.kernel_name }}"
           else
             scripts/config --file out/.config --set-str LOCALVERSION ""
           fi
 
-          # --- LTO Config ---
+          # Config LTO
           scripts/config --file out/.config \
               -e LTO_CLANG \
               -d LTO_NONE \
@@ -166,7 +161,7 @@ jobs:
       - name: Determine Artifact Name
         id: artifact-name
         run: |
-          if [ -z "${{ github.event.inputs.kernel_name }}" ]; then
+          if [[ -z "${{ github.event.inputs.kernel_name }}" ]]; then
             echo "NAME=GKI-Image-Android14" >> $GITHUB_ENV
           else
             echo "NAME=${{ github.event.inputs.kernel_name }}-Image" >> $GITHUB_ENV
@@ -177,70 +172,3 @@ jobs:
         with:
           name: ${{ env.NAME }}
           path: gki/common/out/arch/arm64/boot/Image
-          compression-level: 9
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_KPROBES_HOOK=n
-          CONFIG_KSU_MANUAL_HOOK=n
-          CONFIG_KSU_HAS_MANUAL_HOOK=n
-          EOF
-
-          
-
-          # --- Logic Nama Kernel ---
-          if [ ! -z "${{ github.event.inputs.kernel_name }}" ]; then
-            scripts/config --file out/.config --set-str LOCALVERSION "-${{ github.event.inputs.kernel_name }}"
-          else
-            scripts/config --file out/.config --set-str LOCALVERSION ""
-          fi
-
-          # --- LTO Config ---
-          scripts/config --file out/.config \
-              -e LTO_CLANG \
-              -d LTO_NONE \
-              -e LTO_CLANG_THIN \
-              -d LTO_CLANG_FULL \
-              -e THINLTO
-
-      - name: Build Kernel Image
-        working-directory: gki/common
-        run: |
-          export PATH="$(pwd)/../toolchain/clang/bin:$PATH"
-          export ARCH=arm64
-          export LLVM=1
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-          
-          echo "Starting Build..."
-          make -j"$(nproc --all)" O=out Image
-
-      - name: Determine Artifact Name
-        id: artifact-name
-        run: |
-          if [ -z "${{ github.event.inputs.kernel_name }}" ]; then
-            echo "NAME=GKI-Image-Android14" >> $GITHUB_ENV
-          else
-            echo "NAME=${{ github.event.inputs.kernel_name }}-Image" >> $GITHUB_ENV
-          fi
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.NAME }}
-          path: gki/common/out/arch/arm64/boot/Image
-          compression-level: 9
