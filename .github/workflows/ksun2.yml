@@ -33,25 +33,16 @@ jobs:
           python3 python3-pip lld zip unzip libncurses5-dev rsync \
           cpio schedtool git-core gnupg libelf-dev dwarves
 
-      - name: Setup Repo Tool
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
-
       - name: Configure Git
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
-          git config --global url."https://".insteadOf git://
 
-      - name: Initialize & Sync Source (GKI 6.1)
+      - name: Clone Kernel Source
         run: |
-          mkdir gki
-          cd gki
-          repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
-          repo sync -j$(nproc) --force-sync
+          echo "⬇️ Cloning Kernel Source (ramabondanp - Branch: android14-6.1)..."
+          mkdir -p gki
+          git clone --depth=1 -b android14-6.1 https://github.com/ramabondanp/android_kernel_common-6.1 gki/common
 
       - name: Setup Custom Clang
         working-directory: gki
@@ -75,29 +66,22 @@ jobs:
           echo "Setting up KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
-      - name: Patch SuSFS (KSUNIV Style + Fix)
+      - name: Patch SuSFS
         working-directory: gki/common
         run: |
           echo "➡️ Cloning susfs4ksu (Branch: gki-android14-6.1)"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 sus
           
           echo "🩹 Patching susfs4ksu"
-          # Mengadopsi logic copy dari KSNUNIV.yml
           cp -r sus/kernel_patches/fs/* fs/
           cp -r sus/kernel_patches/include/* include/
           cp sus/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           
-          # Apply patch dengan toleransi error (|| true) karena hunk #1 base.c sering gagal
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+          # Apply patch standar
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
           
-          # FIX MANUAL: Cek jika patch gagal menambahkan header di fs/proc/base.c
-          if ! grep -q "linux/susfs.h" fs/proc/base.c; then
-            echo "⚠️ Hunk #1 Failed detected. Fixing fs/proc/base.c manually..."
-            sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
-          fi
-          
-          echo "✅ SUSFS patched successfully"
-          rm -rf sus 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
+          echo "✅ SUSFS patched"
+          rm -rf sus 50_add_susfs_in_gki-android14-6.1.patch
 
       - name: Configure Kernel
         working-directory: gki/common
@@ -109,19 +93,14 @@ jobs:
           echo "Generating GKI defconfig..."
           make O=out gki_defconfig
 
-          echo "⚙️ Injecting Configs (KSNUNIV Style)..."
+          echo "⚙️ Injecting Configs..."
           
-          # --- Logic Config dari KSNUNIV.yml ---
+          # Config KSU & SuSFS
           cat <<EOF >> out/.config
-          
-          # ===============================================
-          # Konfigurasi KSU NEXT (Base)
           CONFIG_KSU=y
           CONFIG_KPM=n
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n
-          
-          # --- SUSFS Method (with built-in inline hook) ---
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -139,38 +118,12 @@ jobs:
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          
-          # Disable other hooks
           CONFIG_KSU_KPROBES_HOOK=n
           CONFIG_KSU_MANUAL_HOOK=n
           CONFIG_KSU_HAS_MANUAL_HOOK=n
-          
-          # --- Performance & Network Tuning (KSNUNIV) ---
-          # Add additional tmpfs config setting
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          # Add additional config setting
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          # Add BBR Config
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
-          CONFIG_DEFAULT_BBR=y
-          # Optimasi tambahan (Smooth & Responsiveness)
-          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-          CONFIG_SCHED_TUNE=y
-          CONFIG_MQ_IOSCHED_KYBER=y
-          CONFIG_MQ_IOSCHED_BFQ=y
-          CONFIG_IOSCHED_BFQ=y
-          CONFIG_BFQ_GROUP_IOSCHED=y
-          CONFIG_ZRAM=y
-          CONFIG_ZRAM_WRITEBACK=y
           EOF
+
+          
 
           # --- Logic Nama Kernel ---
           if [ ! -z "${{ github.event.inputs.kernel_name }}" ]; then
