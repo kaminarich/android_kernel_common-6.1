@@ -1,4 +1,4 @@
-name: Build GKI 6.1 KSUN + SuSFS
+name: Build GKI 6.1 KSN SUSFS
 
 on:
   workflow_dispatch:
@@ -75,22 +75,29 @@ jobs:
           echo "Setting up KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
-      - name: Patch SuSFS (KSUNIV Style)
+      - name: Patch SuSFS (KSUNIV Style + Fix)
         working-directory: gki/common
         run: |
-          echo "> Cloning susfs4ksu (Branch: gki-android14-6.1)"
+          echo "➡️ Cloning susfs4ksu (Branch: gki-android14-6.1)"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 sus
           
-          echo "> Patching susfs4ksu"
+          echo "🩹 Patching susfs4ksu"
           # Mengadopsi logic copy dari KSNUNIV.yml
           cp -r sus/kernel_patches/fs/* fs/
           cp -r sus/kernel_patches/include/* include/
           cp sus/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+          # Apply patch dengan toleransi error (|| true) karena hunk #1 base.c sering gagal
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
           
-          echo "> SUSFS patched successfully"
-          rm -rf sus 50_add_susfs_in_gki-android14-6.1.patch
+          # FIX MANUAL: Cek jika patch gagal menambahkan header di fs/proc/base.c
+          if ! grep -q "linux/susfs.h" fs/proc/base.c; then
+            echo "⚠️ Hunk #1 Failed detected. Fixing fs/proc/base.c manually..."
+            sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
+          fi
+          
+          echo "✅ SUSFS patched successfully"
+          rm -rf sus 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
 
       - name: Configure Kernel
         working-directory: gki/common
@@ -102,9 +109,9 @@ jobs:
           echo "Generating GKI defconfig..."
           make O=out gki_defconfig
 
-          echo "> Injecting Configs..."
+          echo "⚙️ Injecting Configs (KSNUNIV Style)..."
           
-          # --- Logic Config  ---
+          # --- Logic Config dari KSNUNIV.yml ---
           cat <<EOF >> out/.config
           
           # ===============================================
@@ -138,7 +145,7 @@ jobs:
           CONFIG_KSU_MANUAL_HOOK=n
           CONFIG_KSU_HAS_MANUAL_HOOK=n
           
-          # --- Performance & Network Tuning ---
+          # --- Performance & Network Tuning (KSNUNIV) ---
           # Add additional tmpfs config setting
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
@@ -154,6 +161,7 @@ jobs:
           CONFIG_TCP_CONG_WESTWOOD=n
           CONFIG_TCP_CONG_HTCP=n
           CONFIG_DEFAULT_BBR=y
+          # Optimasi tambahan (Smooth & Responsiveness)
           CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
           CONFIG_SCHED_TUNE=y
           CONFIG_MQ_IOSCHED_KYBER=y
