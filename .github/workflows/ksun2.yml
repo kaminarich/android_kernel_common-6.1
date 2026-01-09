@@ -1,4 +1,4 @@
-name: Build GKI 6.1 (KSU + SuSFS + KPatch) - Fix Header
+name: Build GKI 6.1 (KSU + SuSFS + KPatch) - Final Header Fix
 
 on:
   workflow_dispatch:
@@ -66,7 +66,7 @@ jobs:
           echo "Setting up KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
-      - name: Patch SuSFS (Manual + Force Header)
+      - name: Patch SuSFS (Manual + Kstat Fix)
         working-directory: gki/common
         run: |
           echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
@@ -78,16 +78,19 @@ jobs:
           cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           
           echo "Applying SUSFS Patch..."
-          # Gunakan || true agar tidak error
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
           
-          echo "🔥 FORCE FIXING fs/proc/base.c..."
-          # Hapus include susfs jika sudah ada (biar ga duplikat)
+          echo "🔥 FIXING Headers Dependencies..."
+          
+          # FIX 1: Tambahkan <linux/stat.h> ke include/linux/susfs.h 
+          # Ini memperbaiki error "struct kstat will not be visible"
+          sed -i '1i#include <linux/stat.h>' include/linux/susfs.h
+          
+          # FIX 2: Inject header ke fs/proc/base.c di baris pertama
           sed -i '/#include <linux\/susfs.h>/d' fs/proc/base.c
-          # Masukkan header di BARIS PERTAMA (Line 1) agar pasti terbaca
           sed -i '1i#include <linux/susfs.h>' fs/proc/base.c
           
-          echo "✅ Header injected at line 1 of fs/proc/base.c"
+          echo "✅ Headers fixed."
           rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
 
       - name: Configure Kernel
@@ -170,7 +173,7 @@ jobs:
               -d LTO_CLANG_FULL \
               -e THINLTO
               
-          echo "🔧 Running olddefconfig to fix config dependencies..."
+          echo "🔧 Running olddefconfig..."
           make O=out olddefconfig
 
       - name: Build Kernel Image
