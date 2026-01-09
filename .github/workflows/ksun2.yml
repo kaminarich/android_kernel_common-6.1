@@ -1,4 +1,4 @@
-name: Build GKI 6.1 (KSU + SuSFS) - Full Fix
+name: Build GKI 6.1 KSUN + SuSFS
 
 on:
   workflow_dispatch:
